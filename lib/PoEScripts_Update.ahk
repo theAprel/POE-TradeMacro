@@ -2,148 +2,16 @@
 #Include, %A_ScriptDir%\lib\zip.ahk
 
 PoEScripts_Update(user, repo, ReleaseVersion, ShowUpdateNotification, userDirectory, isDevVersion, skipSelection, skipBackup, SplashScreenTitle = "") {
-	status := GetLatestRelease(user, repo, ReleaseVersion, ShowUpdateNotification, userDirectory, isDevVersion, skipSelection, skipBackup, SplashScreenTitle)
-	Return status
+	Return "no update"
 }
 
 GetLatestRelease(user, repo, ReleaseVersion, ShowUpdateNotification, userDirectory, isDevVersion, skipSelection, skipBackup, SplashScreenTitle = "") {
-	If (ShowUpdateNotification = 0) {
-		return
-	}
-	HttpObj		:= ComObjCreate("WinHttp.WinHttpRequest.5.1")
-	url			:= "https://api.github.com/repos/" . user . "/" . repo . "/releases"
-	downloadUrl	:= "https://github.com/" . user . "/" . repo . "/releases"
-	html			:= ""
-
-	postData		:= ""
-	options		:= ""
 	
-	reqHeaders	:= []
-	reqHeaders.push("Content-Type: text/html; charset=UTF-8")
-	
-	Try  {
-		errorMsg	:= "Update check failed. Please check manually on the Github page for updates.`nThe script will now continue."
-		html 	:= PoEScripts_Download(url, ioData := postData, ioHdr := reqHeaders, options, true, false, false, errorMsg)
-		
-		If (StrLen(html) < 1) {	
-			; all download errors should have been catched and handled by the download functions
-			; exit the update check to skip all additional error handling
-			return
-		}	
-		
-		parsedJSON	:= JSON.Load(html)
-		LatestRelease	:= {}
-		LastXReleases	:= []
-		updateNotes	:= ""
-		i := 0
-		showReleases	:= 5
-		For key, val in parsedJSON {
-			i++
-			If (i <= showReleases) {
-				tempObj := {}
-				tempObj.notes 		:= ParseDescription(val.body)
-				tempObj.tag 		:= val.tag_name
-				tempObj.published 	:= ParsePublishDate(val.published_at)
-				tempObj.textBlock 	:= CreateTextBlock(tempObj.notes, tempObj.published, tempObj.tag)
-				updateNotes 		.= tempObj.textBlock
-				LastXReleases.push(tempObj)
-			}
-		}
-		For key, val in parsedJSON {			
-			If (not val.draft) {
-				LatestRelease := val				
-				Break
-			}
-		}
-
-		; get download link to zip files (normal release zip and asset zip file)
-		UrlParts := StrSplit(LatestRelease.zipball_url, "/")
-		downloadFile 		:= UrlParts[UrlParts.MaxIndex()] . ".zip"
-		downloadURL_zip 	:= "https://github.com/" . user . "/" . repo . "/archive/" . downloadFile
-		downloadURL_asset 	:= ""
-		If (LatestRelease.assets.MaxIndex()) {
-			For key, val in LatestRelease.assets {
-				If (InStr(val.content_type, "zip")) {
-					downloadURL_asset := val.browser_download_url
-				}
-			}
-		}
-		
-		global updateWindow_Project 		:= repo
-		global updateWindow_DefaultFolder	:= A_ScriptDir
-		global updateWindow_isDevVersion	:= isDevVersion
-		global updateWindow_downloadURL	:= StrLen(downloadURL_asset) ? downloadURL_asset : downloadURL_zip
-		global updateWindow_skipSelection	:= skipSelection
-		global updateWindow_skipBackup	:= skipBackup
-		global updateWindow_userDirectory	:= userDirectory
-
-		isPrerelease:= LatestRelease.prerelease
-		releaseTag  := LatestRelease.tag_name
-		releaseURL  := downloadUrl . "/tag/" . releaseTag
-		publisedAt  := LatestRelease.published_at
-		description := LatestRelease.body
-		
-		RegExReplace(releaseTag, "^v", releaseTag)
-		versions := ParseVersionStringsToObject(releaseTag, ReleaseVersion)
-		
-		newRelease := CompareVersions(versions.latest, versions.current)
-		If (newRelease) {
-			If(SplashScreenTitle) {
-				WinSet, AlwaysOnTop, Off, %SplashScreenTitle%
-			}
-			Gui, UpdateNotification:Font,, Consolas
-
-			Gui, UpdateNotification:Add, GroupBox, w630 h80 cGreen, Update available!			
-			If (isPrerelease) {
-				Gui, UpdateNotification:Add, Text, x20 yp+20, Warning: This is a pre-release.
-				Gui, UpdateNotification:Add, Text, x20 y+10, Installed version:
-			} Else {
-				Gui, UpdateNotification:Add, Text, x20 yp+30, Installed version:
-			}
-			
-			currentLabel := versions.current.label
-			latestLabel  := versions.latest.label
-			
-			Gui, UpdateNotification:Add, Text, x150 yp+0,  %currentLabel%	
-			
-			Gui, UpdateNotification:Add, Text, x20 y+0, Latest version:
-			
-			Gui, UpdateNotification:Add, Text, x150 yp+0,  %latestLabel%
-			Gui, UpdateNotification:Add, Link, x+20 yp+0 cBlue, <a href="%releaseURL%">Download it here</a>
-			Gui, UpdateNotification:Add, Button, x+20 yp-5 gUpdateScript, Update
-			
-			Gui, UpdateNotification:Add, Text, x10 cGreen, Update notes:
-			Gui, UpdateNotification:Add, Edit, r20 ReadOnly w630 BackgroundTrans, %updateNotes%
-			
-			Gui, UpdateNotification:Add, Button, gCloseUpdateWindow, Close			
-			
-			If (repo = "PoE-TradeMacro") {
-				payPalUrl := "https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=4ZVTWJNH6GSME"
-				Gui, UpdateNotification:Add, Picture, x460 y17 w150 h-1, %A_ScriptDir%\resources\images\Paypal-Logo.png
-				Gui, UpdateNotification:Add, Link, x450 y63 cBlue, <a href="%payPalUrl%">Donate / Buy me a Mystery Box</a>
-			}
-			
-			Gui, UpdateNotification:Show, w650 xCenter yCenter, Update 
-			ControlFocus, Update, Update
-			WinWaitClose, Update
-			Gui, UpdateNotification:Destroy
-		}
-		Else {
-			s := "no update"
-			Return s
-		}
-	} Catch e {
-		SplashTextOff
-		MsgBox,,, % "Update-Check failed, Exception thrown!`n`nwhat: " e.what "`nfile: " e.file "`nline: " e.line "`nmessage: " e.message "`nextra: " e.extra
-	}
-	
-	Return
+	Return "no update"
 }
 
 ParseDescription(description) {
-	description := RegExReplace(description, "iU)\\""", """")
-	StringReplace, description, description, \r\n, §, All 
-	StringReplace, description, description, \n, §, All
+	
 
 	Return description
 }
